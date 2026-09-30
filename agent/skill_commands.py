@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from hermes_constants import display_hermes_home
-from agent.initiate_setup_prompt import HEADER as INITIATE_SETUP_HEADER
 from agent.prompt_cache_boundary import register_stable_prefix
 from agent.skill_preprocessing import load_skills_config as _load_skills_config, preprocess_skill_content
 
@@ -153,9 +152,6 @@ def describe_skill_invocation(content: Any, separator: str = " — ") -> Optiona
     """
     if not isinstance(content, str):
         return None
-    # The /initiate-setup built-in carries its own header, not the skill scaffold.
-    if content.startswith(INITIATE_SETUP_HEADER):
-        return "/initiate-setup"
     if content.startswith(_AUTO_LOAD_PREFIX):
         return _describe_auto_loaded_skill_turn(content)
     if not content.startswith(_SKILL_INVOCATION_PREFIX):
