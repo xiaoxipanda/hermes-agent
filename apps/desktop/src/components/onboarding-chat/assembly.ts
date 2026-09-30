@@ -1,7 +1,8 @@
 import { useStore } from '@nanostores/react'
 import { atom } from 'nanostores'
 
-import { allPaneIds, group, type LayoutNode } from '@/components/pane-shell/tree/model'
+import { DEMO_LAYOUT_ID, DEMO_TREE } from '@/app/contrib/layout-presets'
+import { allPaneIds, type LayoutNode } from '@/components/pane-shell/tree/model'
 import { applyLayoutPreset } from '@/components/pane-shell/tree/presets'
 import {
   $activePresetId,
@@ -15,39 +16,22 @@ import {
   undismissTreePanes
 } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
-import { runtimeTranslations } from '@/i18n/runtime'
 import { isOnboardingEnabled } from '@/lib/onboarding-enabled'
-import { $interfaceMode, type InterfaceMode, setInterfaceMode } from '@/store/interface-mode'
+import { $interfaceMode, type InterfaceMode, modeLayout, setInterfaceMode } from '@/store/interface-mode'
 import { setSidebarOpen } from '@/store/layout'
-import { loadMachineProfile, machineUserName } from '@/store/machine'
-import { skipGuide } from '@/store/onboarding-gate'
-import { setOnboardingSurfaceActive } from '@/store/onboarding-presence'
 import { $paneStates, type PaneStateSnapshot } from '@/store/panes'
 import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
 
+/** The demo layout is on screen: the chat alone, narrower, minimal composer, no status bar. */
 export const $chatOnboardingSolo = atom(false)
 
-$chatOnboardingSolo.subscribe(solo => setOnboardingSurfaceActive('solo-chat', solo))
+// The demo is borrowed: nothing it changes is persisted as the user's layout.
+$chatOnboardingSolo.subscribe(solo => {
+  modeLayout.hold(solo)
+  document.documentElement.toggleAttribute('data-onboarding-demo', solo)
+})
 
 export const $chatOnboardingThreadIds = atom<readonly string[]>([])
-
-export const $onboardingGreeting = atom('')
-
-export function pickOnboardingGreeting(): string {
-  const existing = $onboardingGreeting.get()
-
-  if (existing) {
-    return existing
-  }
-
-  const copy = runtimeTranslations().guidedGreeting
-  const suggested = machineUserName()
-
-  const greeting = suggested ? `${copy.line}\n\n${copy.nameSuggestion(suggested)}` : copy.line
-  $onboardingGreeting.set(greeting)
-
-  return greeting
-}
 
 export const $chatLayoutPicked = atom(false)
 
@@ -83,13 +67,16 @@ export function startChatOnboardingSolo(): void {
   }
   $chatOnboardingSolo.set(true)
   $chatLayoutPicked.set(false)
-  void loadMachineProfile()
-  applyLayoutPreset('chat-solo', group(['workspace'], { tabStrip: 'never' }))
+  applyLayoutPreset(DEMO_LAYOUT_ID, DEMO_TREE)
 }
 
+/** Leave the demo for the user's own layout at the normal window size. */
 export function endChatOnboardingSolo(): void {
+  if ($chatOnboardingSolo.get()) {
+    window.hermesDesktop?.chatOnboarding?.size('normal')
+  }
+
   $chatOnboardingSolo.set(false)
-  $onboardingGreeting.set('')
   restorePreviousLayout()
 }
 
@@ -137,6 +124,8 @@ function reconcileLayout(id: string, tree: LayoutNode): void {
 }
 
 export function assembleChatOnboarding(id: string, tree: LayoutNode, mode?: InterfaceMode): void {
+  $chatOnboardingSolo.set(false)
+
   if (mode && mode !== $interfaceMode.get()) {
     restorePreviousLayout()
     setInterfaceMode(mode)
@@ -147,8 +136,6 @@ export function assembleChatOnboarding(id: string, tree: LayoutNode, mode?: Inte
   window.hermesDesktop?.chatOnboarding?.size('normal')
 
   reconcileLayout(id, tree)
-
-  $chatOnboardingSolo.set(false)
 }
 
 export function snapshotChatLayout(): () => void {
@@ -168,6 +155,15 @@ export function snapshotChatLayout(): () => void {
       setInterfaceMode(snapshot.mode)
     }
 
+    // A pick made in the demo ended the intro, so undoing it lands on the user's own layout.
+    if (snapshot.solo) {
+      previousLayout = snapshot.previous
+      restorePreviousLayout()
+      $chatLayoutPicked.set(snapshot.picked)
+
+      return
+    }
+
     if (snapshot.tree) {
       $layoutTree.set(snapshot.tree)
       $paneStates.set(snapshot.panes)
@@ -178,24 +174,7 @@ export function snapshotChatLayout(): () => void {
 
     previousLayout = snapshot.previous
     $chatLayoutPicked.set(snapshot.picked)
-
-    if (snapshot.solo && !$chatOnboardingSolo.get()) {
-      $chatOnboardingSolo.set(true)
-      window.hermesDesktop?.chatOnboarding?.size('onboarding')
-    }
   }
-}
-
-export function skipChatOnboarding(): void {
-  const preset = registry.getArea('layouts').find(contribution => contribution.id === 'basic')
-
-  if (preset?.data) {
-    assembleChatOnboarding(preset.id, preset.data as LayoutNode)
-  } else {
-    $chatOnboardingSolo.set(false)
-  }
-
-  skipGuide()
 }
 
 export function useOnboardingChatActive(): boolean {
